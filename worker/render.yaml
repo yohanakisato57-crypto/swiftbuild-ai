@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: swiftbuild-worker
+    runtime: node
+    rootDir: worker
+    plan: starter
+    buildCommand: npm install
+    startCommand: node server.mjs
+    healthCheckPath: /
+    envVars:
+      - key: SUPABASE_URL
+        value: https://dqfbmxotrvnjlorcmwdd.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-6.1-sol
+      - key: ALLOWED_ORIGIN
+        sync: false
+      - key: MAX_FILES
+        value: "6"
