@@ -18,5 +18,7 @@ services:
         value: gpt-6.1-sol
       - key: ALLOWED_ORIGIN
         sync: false
+      - key: E2B_API_KEY
+        sync: false
       - key: MAX_FILES
         value: "6"

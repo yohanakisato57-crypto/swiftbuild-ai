@@ -7,6 +7,7 @@ import { collectCompletion, looksComplete, parseJsonStrict, stripFence } from '.
 import { BACKEND_SYSTEM, REVIEW_SYSTEM, TEST_SYSTEM, runTests, staticCheck } from './agents.mjs';
 import { checkImageUrls, withImageFallback } from './consistency.mjs';
 import { runSandbox } from './sandbox.mjs';
+import { runE2B, e2bEnabled } from './e2b.mjs';
 
 const env = process.env;
 const PORT = Number(env.PORT || 8787);
@@ -147,7 +148,23 @@ function makeLimiter(n) {
 }
 const buildLimiter = makeLimiter(MAX_CONCURRENT_BUILDS);
 const sandboxLimiter = makeLimiter(MAX_SANDBOX);
-const sandbox = (files) => sandboxLimiter.run(() => runSandbox(files));
+// Project Execution Engine: E2B cloud sandbox first (real install/build/serve), then the local jsdom runtime tests
+// for static projects. If E2B_API_KEY is missing or E2B is unavailable/slow, the local sandbox runs alone (safe fallback).
+const e2bLimiter = makeLimiter(Math.max(1, Number(env.MAX_E2B || 3)));
+const sandbox = (files) => sandboxLimiter.run(async () => {
+  if (!e2bEnabled()) return runSandbox(files);
+  const e = await e2bLimiter.run(() => runE2B(files));
+  if (e.unavailable) {
+    console.warn('[engine] E2B unavailable, using local sandbox:', e.reason);
+    const l = await runSandbox(files);
+    return { ...l, logs: [`E2B unavailable (${e.reason}); local sandbox used.`, ...(l.logs || [])], engine: 'local-fallback' };
+  }
+  if (!e.ok) return e; // real build/syntax/serve failure from E2B goes straight to the Debug Agent
+  const hasPkg = (files || []).some((f) => f.name === 'package.json');
+  if (hasPkg) return e; // built apps: E2B verified install, build and HTTP serving
+  const l = await runSandbox(files); // static apps: add jsdom click/runtime tests
+  return { ...l, logs: [...(e.logs || []), ...(l.logs || [])], install: e.install, build: e.build, engine: 'e2b+jsdom', ok: l.ok };
+});
 
 /** Runs fn alone for this user: two jobs of one user can never read the balance and charge at the same moment. */
 const userLocks = new Map();
