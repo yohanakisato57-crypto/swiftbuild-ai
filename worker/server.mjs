@@ -20,10 +20,15 @@ for (const k of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OPENAI_API_KEY'])
 }
 const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-const PLAN_SYSTEM = `You are SwiftBuild AI's architect. Break the user's request into a set of separate files (3 to ${MAX_FILES} files), so each file can be written on its own. Good examples: index.html, styles.css, app.js, components like Sidebar.js, GameBoard.js, PricingCard.js, GameLogic.js, data.js. Keep each file focused on one job. Plain HTML/CSS/vanilla JavaScript only, no build tools, no npm. Reply ONLY JSON: {"title": string (max 5 words), "files": [{"name": string, "lang": "html"|"css"|"js", "purpose": string (one sentence)}]}. The first file must be index.html, which loads every other file (CSS via <link>, JS via <script src>).`;
+const PLAN_SYSTEM = `You are SwiftBuild AI's architect. Break the user's request into a set of separate files (3 to ${MAX_FILES} files), so each file can be written on its own. Good examples: index.html, styles.css, app.js, components like Sidebar.js, GameBoard.js, PricingCard.js, GameLogic.js, data.js. Keep each file focused on one job. Plain HTML/CSS/vanilla JavaScript only, no build tools, no npm. First classify the request: "quick_edit" (a small tweak or tiny single-page change) or "full_build" (a new or large project). For quick_edit list only index.html. Reply ONLY JSON: {"mode": "quick_edit"|"full_build", "title": string (max 5 words), "files": [{"name": string, "lang": "html"|"css"|"js", "purpose": string (one sentence)}]}. The first file must be index.html, which loads every other file (CSS via <link>, JS via <script src>).`;
 const FILE_SYSTEM = `You are SwiftBuild AI, an expert front-end engineer. Write ONE complete file for the project described. The file must be real, working, polished and responsive, with real specific content for the user's request, never lorem ipsum, never a placeholder. Other files in the same project are listed for context; reference them by exact name. Reply with ONLY the raw complete file text: no JSON, no markdown fences, no commentary. Keep code concise, no comments. For data files include at most 12 short entries.`;
 
-async function streamText(system, user, maxTokens, asJson) {
+const PLAN_MODEL = env.PLAN_MODEL || 'gpt-4o-mini';
+const CODE_MODEL = env.CODE_MODEL || 'gpt-4o';
+const DEBUG_MODEL = env.DEBUG_MODEL || 'gpt-4o-mini';
+const DEBUG_SYSTEM = `You are a Debug Agent and build tester. You get ONE project file. Check it for syntax errors, unclosed tags/brackets/strings, truncated endings, and references to missing files or undefined functions. If it is fine, reply exactly: OK. Otherwise reply with ONLY the complete corrected file text: no markdown fences, no commentary. Never shorten or remove working features.`;
+
+async function streamText(system, user, maxTokens, asJson, model = MODEL) {
   const ctl = new AbortController();
   let idle;
   const bump = () => { clearTimeout(idle); idle = setTimeout(() => ctl.abort(new Error('The AI stopped responding (timeout).')), IDLE_MS); };
@@ -36,7 +41,7 @@ async function streamText(system, user, maxTokens, asJson) {
       signal: ctl.signal,
       headers: { 'content-type': 'application/json', authorization: `Bearer ${OPENAI_KEY}` },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         stream: true,
         prompt_cache_key: 'swiftbuild-build-files',
         ...(asJson ? { response_format: { type: 'json_object' } } : {}),
@@ -106,21 +111,22 @@ async function runJob(jobId, rules) {
     let title = String(job.title || 'New project');
 
     if (!rows || rows.length === 0) {
-      await setJob({ status: 'planning', stage: 'Planning your project' });
+      await setJob({ status: 'planning', stage: 'AI Orchestrator & Planning AI', current_step: 'orchestrator' });
       let plan = null, planErr = null;
       for (let a = 1; a <= 3 && !plan; a++) {
-        try { plan = parseJsonStrict(await streamText(PLAN_SYSTEM + rules, prompt, 800, true)); } catch (e) { planErr = e; }
+        try { plan = parseJsonStrict(await streamText(PLAN_SYSTEM + rules, prompt, 800, true, PLAN_MODEL)); } catch (e) { planErr = e; }
       }
       if (!plan) throw planErr || new Error('Planning failed.');
-      const planned = (plan.files || []).filter((f) => f && typeof f.name === 'string').slice(0, MAX_FILES)
+      const quick = plan.mode === 'quick_edit';
+      const planned = (plan.files || []).filter((f) => f && typeof f.name === 'string').slice(0, quick ? 1 : MAX_FILES)
         .map((f) => ({ name: cleanName(f.name), lang: LANG_OF(String(f.name)), purpose: String(f.purpose || '').slice(0, 200) }));
       if (!planned.some((f) => f.name === 'index.html')) throw new Error('The planner returned no index.html.');
       title = String(plan.title || 'New project').slice(0, 60);
       await db.from('build_files').insert(planned.map((f, i) => ({ job_id: jobId, user_id: userId, idx: i, name: f.name, lang: f.lang, purpose: f.purpose, status: 'pending', content: f.name === 'index.html' ? baseHtml(title) : null })));
-      await setJob({ status: 'writing', stage: 'Writing files', title, total_files: planned.length });
+      await setJob({ status: 'writing', stage: 'Coding Agent & Backend Manager', current_step: 'coding', title, total_files: planned.length });
       ({ data: rows } = await db.from('build_files').select('idx,name,lang,purpose,status,content').eq('job_id', jobId).order('idx'));
     } else {
-      await setJob({ status: 'writing', stage: 'Resuming build' });
+      await setJob({ status: 'writing', stage: 'Resuming build', current_step: 'coding' });
     }
 
     const all = rows || [];
@@ -139,7 +145,7 @@ async function runJob(jobId, rules) {
             await setJob({ stage: `Retrying ${f.name} (attempt ${attempt}/4)` });
             await new Promise((r) => setTimeout(r, 1500 * (attempt - 1)));
           }
-          content = stripFence(await streamText(FILE_SYSTEM + rules, user, 8000, false));
+          content = stripFence(await streamText(FILE_SYSTEM + rules, user, 8000, false, CODE_MODEL));
           if (f.name === 'index.html') content = ensureHtml(content, title);
           if (!looksComplete(f.name, content)) throw new Error(`${f.name} looks truncated or empty.`);
           lastErr = null;
@@ -159,6 +165,19 @@ async function runJob(jobId, rules) {
     if (failed) throw failed.reason;
     written.sort((a, b) => all.findIndex((x) => x.name === a.name) - all.findIndex((x) => x.name === b.name));
 
+    // Step 3: Debug Agent & Build Test Engine. Best effort: a failed check keeps the original file.
+    await setJob({ stage: 'Debug & Build Engine', current_step: 'debug' });
+    await Promise.allSettled(written.map(async (w) => {
+      try {
+        const out = stripFence(await streamText(DEBUG_SYSTEM, `File: ${w.name}\nOther files:\n${manifest}\n\n${w.content}`, 8000, false, DEBUG_MODEL));
+        if (!out || /^OK\.?$/i.test(out.trim())) return;
+        if (out.length < w.content.length * 0.7 || !looksComplete(w.name, out)) return;
+        w.content = w.name === 'index.html' ? ensureHtml(out, title) : out;
+        await db.from('build_files').update({ content: w.content }).eq('job_id', jobId).eq('name', w.name);
+      } catch { /* keep original */ }
+    }));
+    await setJob({ stage: 'Live Preview Ready', current_step: 'preview' });
+
     // Charge only after success, never more than the balance.
     const { data: prof } = await db.from('profiles').select('credits').eq('id', userId).single();
     const cost = Math.max(0, Math.min(buildCost(prompt, written), prof?.credits ?? 0));
@@ -168,7 +187,7 @@ async function runJob(jobId, rules) {
     }
     const files = written.map((w) => ({ name: w.name, lang: w.lang, content: w.content }));
     const { data: row } = await db.from('projects').insert({ user_id: userId, title, prompt, mode: 'build', files, cost }).select('id').single();
-    await setJob({ status: 'done', stage: 'Finished', cost, project_id: row?.id ?? null, title });
+    await setJob({ status: 'done', stage: 'Finished', current_step: 'done', cost, project_id: row?.id ?? null, title });
   } catch (err) {
     await setJob({ status: 'error', error: err.message || 'Build failed.', stage: 'Stopped' });
   } finally {

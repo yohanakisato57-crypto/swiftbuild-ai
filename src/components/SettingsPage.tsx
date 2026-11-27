@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, BarChart3, Check, CreditCard, Loader2, Sparkles, SlidersHorizontal, User } from 'lucide-react';
+import { ArrowLeft, BarChart3, Check, CreditCard, Loader2, Shield, Sparkles, SlidersHorizontal, User } from 'lucide-react';
+import AdminPanel from './AdminPanel';
+
+const ADMIN_EMAIL = 'yohanakisato57@gmail.com';
 import { supabase, type Account } from '../lib/auth';
 import PlansGrid, { planFromPacks } from './PlansGrid';
 
-type Tab = 'profile' | 'billing' | 'usage' | 'instructions';
+type Tab = 'profile' | 'billing' | 'usage' | 'instructions' | 'admin';
 
 interface Ledger { id: number; delta: number; reason: string; balance_after: number; created_at: string }
 interface Order { pack_id: number; id: number; reference: string; credits: number; amount: number; currency: string; status: string; credited: boolean; created_at: string }
@@ -115,7 +118,7 @@ export default function SettingsPage({
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-line p-2 md:w-64 md:flex-col md:border-b-0 md:border-r md:p-3">
-          {TABS.map((t) => (
+          {[...TABS, ...(account.email.toLowerCase() === ADMIN_EMAIL ? [{ id: 'admin' as Tab, label: 'Admin Panel', icon: Shield }] : [])].map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -129,7 +132,7 @@ export default function SettingsPage({
         </nav>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-8">
-          <div className={`mx-auto space-y-5 ${tab === 'billing' ? 'max-w-7xl' : 'max-w-4xl'}`}>
+          <div className={`mx-auto space-y-5 ${tab === 'billing' ? 'max-w-7xl' : tab === 'admin' ? 'max-w-5xl' : 'max-w-4xl'}`}>
             {tab === 'profile' && (
               <>
                 <h2 className="text-lg font-semibold">Profile & Account</h2>
@@ -204,6 +207,52 @@ export default function SettingsPage({
                     </div>
                   )}
                 </div>
+                <div className={card}>
+                  <h3 className="mb-3 text-sm font-semibold">Credits usage log</h3>
+                  {ledger.length === 0 && projects.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-faint">No credit activity yet.</p>
+                  ) : (
+                    <div className="max-h-72 overflow-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="sticky top-0 bg-panel text-xs text-faint">
+                          <tr><th className="py-2 pr-3 font-medium">Date</th><th className="pr-3 font-medium">Activity</th><th className="pr-3 text-right font-medium">Credits</th><th className="text-right font-medium">Balance</th></tr>
+                        </thead>
+                        <tbody>
+                          {[...ledger].reverse().map((l) => (
+                            <tr key={l.id} className="border-t border-line">
+                              <td className="py-2.5 pr-3 text-muted">{fmt(l.created_at)}</td>
+                              <td className="max-w-[16rem] truncate pr-3">{l.reason}</td>
+                              <td className={`pr-3 text-right font-medium ${l.delta < 0 ? 'text-red-400' : 'text-volt'}`}>{l.delta > 0 ? '+' : ''}{l.delta}</td>
+                              <td className="text-right text-muted">{l.balance_after}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+                {projects.length > 0 && (
+                  <div className={card}>
+                    <h3 className="mb-3 text-sm font-semibold">Credits used per project</h3>
+                    <div className="max-h-56 overflow-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="sticky top-0 bg-panel text-xs text-faint">
+                          <tr><th className="py-2 pr-3 font-medium">Project</th><th className="pr-3 font-medium">Mode</th><th className="pr-3 font-medium">Date</th><th className="text-right font-medium">Credits</th></tr>
+                        </thead>
+                        <tbody>
+                          {projects.map((p) => (
+                            <tr key={p.id} className="border-t border-line">
+                              <td className="max-w-[14rem] truncate py-2.5 pr-3">{p.title}</td>
+                              <td className="pr-3 capitalize text-muted">{p.mode}</td>
+                              <td className="pr-3 text-muted">{fmt(p.created_at)}</td>
+                              <td className="text-right">−{p.cost}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -242,6 +291,8 @@ export default function SettingsPage({
                 </div>
               </>
             )}
+
+            {tab === 'admin' && account.email.toLowerCase() === ADMIN_EMAIL && <AdminPanel />}
 
             {tab === 'instructions' && (
               <>

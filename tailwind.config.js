@@ -7,16 +7,16 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: '#0a0d0c',
-        panel: '#101412',
-        raised: '#161b18',
-        line: { DEFAULT: '#232a26', strong: '#333c37' },
-        fg: '#e9eeea',
-        muted: '#98a39d',
-        faint: '#75807a',
-        volt: { DEFAULT: '#c8f54a', ink: '#121808' },
-        danger: '#ff7b6b',
-        gold: '#f0c36a',
+        bg: 'rgb(var(--c-bg) / <alpha-value>)',
+        panel: 'rgb(var(--c-panel) / <alpha-value>)',
+        raised: 'rgb(var(--c-raised) / <alpha-value>)',
+        line: { DEFAULT: 'rgb(var(--c-line) / <alpha-value>)', strong: 'rgb(var(--c-line-strong) / <alpha-value>)' },
+        fg: 'rgb(var(--c-fg) / <alpha-value>)',
+        muted: 'rgb(var(--c-muted) / <alpha-value>)',
+        faint: 'rgb(var(--c-faint) / <alpha-value>)',
+        volt: { DEFAULT: 'rgb(var(--c-volt) / <alpha-value>)', ink: 'rgb(var(--c-volt-ink) / <alpha-value>)' },
+        danger: 'rgb(var(--c-danger) / <alpha-value>)',
+        gold: 'rgb(var(--c-gold) / <alpha-value>)',
       },
       fontFamily: {
         sans: ['Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'],

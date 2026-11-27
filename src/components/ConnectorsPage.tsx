@@ -28,6 +28,7 @@ const AI = 'AI Models & Media Engines';
 const DBG = 'Cloud Databases';
 const SOC = 'Social & Productivity Apps';
 const PAY = 'Global & Local Payment Gateways';
+const EML = 'Email, SMS & Automation';
 
 const CONNECTORS: Connector[] = [
   { id: 'openai', group: AI, name: 'OpenAI', desc: 'GPT models for chat, code and image generation.', color: 'from-emerald-300 to-teal-500', fields: KEY('API Key', 'sk-…') },
@@ -54,9 +55,20 @@ const CONNECTORS: Connector[] = [
   { id: 'paypal', group: PAY, name: 'PayPal', desc: 'Checkout with PayPal balances and cards.', color: 'from-blue-300 to-blue-700', fields: PAIR() },
   { id: 'pesapal', group: PAY, name: 'Pesapal Tanzania', desc: 'Mobile money and cards across East Africa.', color: 'from-lime-300 to-emerald-600', fields: PAIR() },
   { id: 'dlocal', group: PAY, name: 'dLocal', desc: 'Local payment methods across emerging markets.', color: 'from-teal-300 to-cyan-600', fields: PAIR() },
+  { id: 'square', group: PAY, name: 'Square', desc: 'Accept US retail, POS, and online card payments.', color: 'from-zinc-200 to-zinc-500', fields: [{ key: 'application_id', label: 'Application ID', placeholder: 'sq0idp-…' }, { key: 'access_token', label: 'Access Token', placeholder: 'EAAA…', secret: true }] },
+  { id: 'plaid', group: PAY, name: 'Plaid', desc: 'Connect US bank accounts for instant ACH verification and payments.', color: 'from-slate-200 to-slate-500', fields: [{ key: 'client_id', label: 'Client ID', placeholder: 'Plaid client ID' }, { key: 'secret_key', label: 'Secret', placeholder: 'Plaid secret', secret: true }] },
+  { id: 'shippo', group: PAY, name: 'Shippo', desc: 'Real-time US shipping rates and labels for USPS, UPS, and FedEx.', color: 'from-sky-300 to-blue-600', fields: KEY('API Token', 'shippo_live_…') },
+
+  { id: 'twilio', group: EML, name: 'Twilio', desc: 'Send SMS notifications, 2FA OTP codes, and voice calls in the US.', color: 'from-red-300 to-rose-600', fields: [{ key: 'account_sid', label: 'Account SID', placeholder: 'AC…' }, { key: 'auth_token', label: 'Auth Token', placeholder: 'Auth token', secret: true }] },
+  { id: 'resend', group: EML, name: 'Resend', desc: 'Modern transactional email API for user signups and receipts.', color: 'from-zinc-200 to-zinc-500', fields: KEY('API Key', 're_…') },
+  { id: 'sendgrid', group: EML, name: 'SendGrid', desc: 'Automated email delivery and marketing campaigns.', color: 'from-sky-300 to-blue-600', fields: KEY('API Key', 'SG.…') },
+  { id: 'mailchimp', group: EML, name: 'Mailchimp', desc: 'Email newsletters and customer audience automation.', color: 'from-yellow-200 to-amber-500', fields: [{ key: 'api_key', label: 'API Key', placeholder: 'xxxx-us21', secret: true }, { key: 'audience_id', label: 'Audience ID', placeholder: 'a1b2c3d4e5' }] },
+  { id: 'hubspot', group: EML, name: 'HubSpot', desc: 'CRM, lead capture forms, and customer sales tracking.', color: 'from-orange-300 to-red-500', fields: KEY('Private App Access Token', 'pat-na1-…') },
+  { id: 'zapier', group: EML, name: 'Zapier', desc: 'Connect your app to 6,000+ US business tools via webhooks.', color: 'from-orange-300 to-orange-600', fields: [{ key: 'webhook_url', label: 'Webhook URL', placeholder: 'https://hooks.zapier.com/hooks/catch/…', secret: true }] },
+  { id: 'gmaps', group: EML, name: 'Google Maps API', desc: 'Location autocomplete, interactive maps, and delivery distance.', color: 'from-green-300 to-emerald-600', fields: KEY('Maps API Key', 'AIza…') },
 ];
 
-const GROUPS = [AI, DBG, SOC, PAY];
+const GROUPS = [AI, DBG, SOC, PAY, EML];
 
 const BRAND: Record<string, { slug?: string; hex: string; mark: string }> = {
   openai: { hex: '10A37F', mark: 'O' }, anthropic: { slug: 'anthropic', hex: 'D97757', mark: 'A' },
@@ -69,6 +81,11 @@ const BRAND: Record<string, { slug?: string; hex: string; mark: string }> = {
   instagram: { slug: 'instagram', hex: 'E4405F', mark: 'I' }, sheets: { slug: 'googlesheets', hex: '34A853', mark: 'S' },
   shopify: { slug: 'shopify', hex: '7AB55C', mark: 'S' }, stripe: { slug: 'stripe', hex: '635BFF', mark: 'S' },
   paypal: { slug: 'paypal', hex: '00457C', mark: 'P' }, pesapal: { hex: '8DC63F', mark: 'PP' }, dlocal: { hex: '00C2A8', mark: 'dL' },
+  square: { slug: 'square', hex: 'FFFFFF', mark: 'Sq' }, plaid: { hex: 'FFFFFF', mark: 'Pl' },
+  shippo: { hex: '2D6BFF', mark: 'Sh' }, twilio: { slug: 'twilio', hex: 'F22F46', mark: 'T' },
+  resend: { slug: 'resend', hex: 'FFFFFF', mark: 'R' }, sendgrid: { hex: '1A82E2', mark: 'SG' },
+  mailchimp: { slug: 'mailchimp', hex: 'FFE01B', mark: 'M' }, hubspot: { slug: 'hubspot', hex: 'FF7A59', mark: 'H' },
+  zapier: { slug: 'zapier', hex: 'FF4F00', mark: 'Z' }, gmaps: { slug: 'googlemaps', hex: '4285F4', mark: 'G' },
 };
 
 function Logo({ id, size = 40 }: { id: string; size?: number }) {

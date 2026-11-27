@@ -240,11 +240,70 @@ function glyph(g: string, f: string): string {
   return `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">${m[g] || m.box}</svg>`;
 }
 
+const U = (id: string) => `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=900&q=70`;
+export const PHOTOS: Record<string, string> = {
+  'Aurora Store': U('1558769132-cb1aea458c5e'),
+  SneakerHub: U('1695073621086-aa692bc32a3d'),
+  'Bloom Florist': U('1469317835793-6d02c2392778'),
+  TechNest: U('1508873699372-7aeab60b44ab'),
+  'Beanline Coffee': U('1506372023823-741c83b836fe'),
+  'Luma Skincare': U('1583209814683-c023dd293cc6'),
+  'Homestead Decor': U('1724582586529-62622e50c0b3'),
+  'PetPal Supplies': U('1585130451336-b0ac5daa3495'),
+  'Pageturner Books': U('1625053376622-e462848c453f'),
+  'FitGear Pro': U('1534438327276-14e5300c3a48'),
+};
+let curPhoto = '';
+const POS = ['20% 50%', '80% 40%', '50% 20%', '50% 85%'];
+
 const tints = (a: string) => [a, '#ffffff', '#fbbf24', '#7dd3fc'];
 const tile = (g: string, a: string, i: number, big = false) =>
-  `<div class="tile${big ? ' big' : ''}" style="background:radial-gradient(circle at 30% 20%,${tints(a)[(i + 1) % 4]}33,#121a16 70%)">${glyph(g, tints(a)[i % 4])}</div>`;
+  curPhoto
+    ? `<div class="tile${big ? ' big' : ''}" style="background:#121a16 url('${curPhoto}') ${POS[i % 4]}/${big ? 'cover' : '260%'} no-repeat"></div>`
+    : `<div class="tile${big ? ' big' : ''}" style="background:radial-gradient(circle at 30% 20%,${tints(a)[(i + 1) % 4]}33,#121a16 70%)">${glyph(g, tints(a)[i % 4])}</div>`;
+
+/** True when a template has a scrollable live preview. */
+export const hasLive = (s: TplSpec) => s.category === 'E-commerce' && Boolean(PHOTOS[s.name]);
+export const LIVE_H = 2300;
+
+/** Full-length interactive storefront: hero, products, accordion, testimonials, footer. */
+export function liveHtml(s: TplSpec, tall = false): string {
+  const a = esc(s.accent);
+  const photo = PHOTOS[s.name];
+  const [, names] = STORE[s.name] || ['box', s.features.slice(0, 4)];
+  const price = (i: number) => (18 + ((i * 17 + s.name.length * 5) % 60) + i * 11).toFixed(2);
+  const F = s.features.length ? s.features : ['Free shipping', 'Easy returns', 'Secure checkout'];
+  const faqs = [
+    ['Shipping & delivery', 'Orders ship within 24 hours with free tracked delivery on orders over $50.'],
+    ['Returns & exchanges', 'Not happy? Return any item within 30 days for a full refund, no questions asked.'],
+    ['Secure payment', 'We accept cards, mobile money and wallets, all protected by encrypted checkout.'],
+    ['Customer support', 'Our team replies in under 2 hours, every day of the week.'],
+  ];
+  const reviews = [['Amina K.', 'Beautiful quality and it arrived fast. I will order again.'], ['David M.', 'Exactly as pictured. Checkout was effortless.'], ['Sofia R.', 'Great service, and the team helped me pick the right one.']];
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;font:14px/1.55 ui-sans-serif,system-ui,sans-serif;background:#0b0f0d;color:#eef3ef;${tall ? 'overflow:hidden' : ''}}
+nav{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:20px;padding:14px 32px;background:#0b0f0dee;border-bottom:1px solid #1f2924}nav b{color:${a};font-size:18px}nav span{color:#9aa79f;margin-left:auto;display:flex;gap:18px}nav i{font-style:normal;border:1px solid #2a3630;border-radius:99px;padding:3px 14px}
+.hero{height:420px;background:linear-gradient(90deg,#0b0f0df0 10%,#0b0f0d22),url('${photo}') center/cover;display:flex;flex-direction:column;justify-content:center;padding:0 48px}
+.hero small{color:${a};letter-spacing:.14em;font-weight:700}.hero h1{font-size:46px;line-height:1.08;margin:8px 0 12px;max-width:520px}.hero p{color:#c9d3cd;max-width:440px}.btn{display:inline-block;margin-top:18px;width:fit-content;background:${a};color:#0b0f0d;font-weight:700;border-radius:10px;padding:11px 22px}
+section{padding:36px 48px}h2{font-size:26px;margin:0 0 4px}.sub{color:#8a968f;margin:0 0 20px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}.pc{background:#121a16;border:1px solid #1f2924;border-radius:14px;padding:10px;transition:transform .25s,border-color .25s}.pc:hover{transform:translateY(-4px);border-color:${a}}.ph{height:170px;border-radius:10px;background-color:#1a2520;background-repeat:no-repeat}.pc h4{margin:10px 0 2px}.pr{display:flex;justify-content:space-between}.pr b{color:${a}}.pr em{font-style:normal;color:#fbbf24;font-size:12px}.add{display:block;text-align:center;margin-top:8px;border:1px solid ${a};color:${a};border-radius:8px;padding:5px;font-size:12px;font-weight:600}
+.feat{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.feat div{background:#121a16;border:1px solid #1f2924;border-radius:14px;padding:18px}.feat b{color:${a}}
+details{background:#121a16;border:1px solid #1f2924;border-radius:12px;margin-bottom:10px;padding:14px 18px}summary{cursor:pointer;font-weight:600;list-style:none;display:flex;justify-content:space-between}summary::after{content:'+';color:${a};font-size:20px;line-height:1}details[open] summary::after{content:'−'}details[open]{border-color:${a}}details p{color:#9aa79f;margin:10px 0 0}
+.rev{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.rev div{background:#121a16;border:1px solid #1f2924;border-radius:14px;padding:18px}.rev .st{color:#fbbf24}.rev p{margin:8px 0;color:#c9d3cd}
+footer{background:#080b09;border-top:1px solid #1f2924;padding:30px 48px;display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:20px;color:#8a968f}footer b{color:#eef3ef;display:block;margin-bottom:6px}
+</style></head><body>
+<nav><b>${esc(s.name)}</b><span><u style="text-decoration:none">Shop</u><u style="text-decoration:none">About</u><u style="text-decoration:none">Contact</u></span><i>Cart (2)</i></nav>
+<div class="hero"><small>NEW COLLECTION</small><h1>${esc(s.tagline)}</h1><p>${F.slice(0, 3).map(esc).join(' · ')}</p><span class="btn">Shop now</span></div>
+<section><h2>Popular products</h2><p class="sub">Customer favourites this week</p><div class="grid">${names.map((n, i) => `<div class="pc"><div class="ph" style="background-image:url('${photo}');background-position:${POS[i % 4]};background-size:300%"></div><h4>${esc(n)}</h4><div class="pr"><b>$${price(i)}</b><em>★ 4.${9 - i}</em></div><span class="add">Add to cart</span></div>`).join('')}</div></section>
+<section><h2>Why shop with us</h2><p class="sub">Everything handled, start to finish</p><div class="feat">${F.slice(0, 3).map((f) => `<div><b>${esc(f)}</b><p style="color:#9aa79f">Built into every order, at no extra cost.</p></div>`).join('')}</div></section>
+<section><h2>Questions, answered</h2><p class="sub">Tap a question to expand it</p>${faqs.map(([q, ans], i) => `<details${i === 0 ? ' open' : ''}><summary>${q}</summary><p>${ans}</p></details>`).join('')}</section>
+<section><h2>What customers say</h2><p class="sub">Over 2,000 five-star reviews</p><div class="rev">${reviews.map(([n, tx]) => `<div><span class="st">★★★★★</span><p>“${tx}”</p><b>${n}</b></div>`).join('')}</div></section>
+<footer><div><b style="color:${a}">${esc(s.name)}</b>${esc(s.tagline)}</div><div><b>Shop</b>New<br>Popular<br>Sale</div><div><b>Help</b>Shipping<br>Returns<br>FAQ</div><div><b>Contact</b>hello@${esc(s.name.toLowerCase().replace(/[^a-z]/g, ''))}.com</div></footer>
+</body></html>`;
+}
 
 function store(s: TplSpec, page: number, a: string): string {
+  curPhoto = PHOTOS[s.name] || '';
   const [g, names] = STORE[s.name] || ['box', s.features.slice(0, 4)];
   const price = (i: number) => (18 + ((i * 17 + s.name.length * 5) % 60) + i * 11).toFixed(2);
   const bar = `<div class="shop"><b>${esc(s.name)}</b><div class="search">Search ${esc(names[0].split(' ')[0].toLowerCase())}…</div><span class="cart">Cart (${page === 2 ? 3 : 2})</span></div>`;

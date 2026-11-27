@@ -39,7 +39,7 @@ export const PLANS: Plan[] = [
     key: 'enterprise', packId: 13, name: 'Enterprise', price: 75, tag: 'For organisations', icon: Crown, top: true,
     lead: 'Everything in Pro, plus',
     features: [
-      '1000+ monthly credits',
+      '800 monthly credits',
       'Dedicated GPT-6.1 Sol server',
       'SOC 2 security & compliance',
       'Team mode workspace',

@@ -10,6 +10,7 @@ export interface Project {
   title: string;
   mode: Mode;
   files: ProjectFile[];
+  createdAt?: string;
 }
 
 type Kind = 'landing' | 'todo' | 'dashboard';

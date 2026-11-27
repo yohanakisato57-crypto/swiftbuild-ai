@@ -37,8 +37,10 @@ async function fn<T>(name: string, body: unknown, query = ''): Promise<Reply<T>>
   const { data: s } = await supabase.auth.getSession();
   try {
     const target = name === 'build-app' && WORKER ? WORKER : `${URL}/functions/v1/${name}${query}`;
+    // keepalive lets the start request finish even if the user leaves the page right away.
     const res = await fetch(target, {
       method: 'POST',
+      keepalive: name === 'build-app' && (body as { action?: string })?.action === 'start',
       headers: {
         'content-type': 'application/json',
         apikey: KEY,
@@ -46,12 +48,20 @@ async function fn<T>(name: string, body: unknown, query = ''): Promise<Reply<T>>
       },
       body: JSON.stringify(body),
     });
-    const data = await res.json().catch(() => ({ error: 'Server unavailable.' }));
-    if (!res.ok && !data.error) data.error = 'Request failed.';
+    const raw = await res.text();
+    let data: any;
+    try { data = JSON.parse(raw); } catch { data = { error: raw.trim().slice(0, 400) || 'Server unavailable.' }; }
+    if (!res.ok && !data.error) data.error = data.message || `Request failed (HTTP ${res.status}).`;
+    if (typeof data.error === 'object') data.error = data.error?.message || JSON.stringify(data.error);
     data.status = res.status;
     return data;
-  } catch {
-    return { error: 'Network error. Check your connection.', status: 0 } as Reply<T>;
+  } catch (e) {
+    const msg = (e as Error)?.message || '';
+    const host = name === 'build-app' && WORKER ? WORKER : 'the server';
+    return {
+      error: `Could not reach ${host}${msg ? ` (${msg})` : ''}. This is usually a CORS block (check ALLOWED_ORIGIN on the Render worker), the worker is waking up or down, or you are offline.`,
+      status: 0,
+    } as Reply<T>;
   }
 }
 
@@ -115,8 +125,23 @@ export async function chargeCredits(amount: number, reason: string): Promise<num
 }
 
 export async function loadProjects(): Promise<Project[]> {
-  const { data } = await supabase.from('projects').select('id,title,mode,files').order('id', { ascending: false }).limit(100);
-  return (data || []).map((p) => ({ id: p.id, title: p.title, mode: p.mode, files: p.files })) as Project[];
+  const { data } = await supabase.from('projects').select('id,title,mode,files,created_at').order('id', { ascending: false }).limit(100);
+  return (data || []).map((p) => ({ id: p.id, title: p.title, mode: p.mode, files: p.files, createdAt: p.created_at })) as Project[];
+}
+
+export interface ActiveJob { id: string; session_id: string | null; title: string | null; prompt: string; stage: string | null; created_at: string; updated_at: string }
+
+/** Background builds still running (read live from Supabase). */
+export async function loadActiveJobs(): Promise<ActiveJob[]> {
+  const since = new Date(Date.now() - 6 * 3600_000).toISOString();
+  const { data } = await supabase
+    .from('build_jobs')
+    .select('id,session_id,title,prompt,stage,created_at,updated_at')
+    .in('status', ['queued', 'planning', 'writing'])
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  return (data as ActiveJob[]) || [];
 }
 
 /** Permanently deletes a project row. Returns an error message, or null on success. */
@@ -146,6 +171,7 @@ export interface BuildJob {
   id: string;
   status: 'queued' | 'planning' | 'writing' | 'done' | 'error';
   stage: string | null;
+  current_step?: string | null;
   title: string | null;
   total_files: number;
   done_files: number;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { pageHtml, coverPage, type TplSpec } from '../lib/mockup';
+import { pageHtml, coverPage, liveHtml, hasLive, LIVE_H, type TplSpec } from '../lib/mockup';
 import { ArrowLeft, Check, Copy, Eye, Lock, Search, Users } from 'lucide-react';
 import { supabase, type Account } from '../lib/auth';
 import type { TemplateItem } from './Sidebar';
@@ -14,7 +14,39 @@ interface Props {
 type Tpl = Omit<TemplateItem, 'prompt'> & { prompt?: string };
 
 /** Renders a mockup page inside an iframe scaled to fit its container width. */
-function ScaledFrame({ spec, page, w = 1000, h = 640, interactive = false }: { spec: TplSpec; page: number; w?: number; h?: number; interactive?: boolean }) {
+function LiveCard({ spec }: { spec: TplSpec }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [k, setK] = useState(0.3);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setK(el.clientWidth / 1000));
+    ro.observe(el);
+    setK(el.clientWidth / 1000);
+    return () => ro.disconnect();
+  }, []);
+  const dist = 1500 * k;
+  return (
+    <div ref={ref} className="relative h-full w-full overflow-hidden bg-bg">
+      <div
+        className="absolute left-0 top-0 transition-transform duration-[6000ms] ease-linear group-hover:translate-y-[var(--d)] group-active:translate-y-[var(--d)]"
+        style={{ ['--d' as string]: `-${dist}px` }}
+      >
+        <iframe
+          title={spec.name}
+          srcDoc={liveHtml(spec, true)}
+          loading="lazy"
+          sandbox=""
+          tabIndex={-1}
+          className="pointer-events-none border-0"
+          style={{ width: 1000, height: LIVE_H, transform: `scale(${k})`, transformOrigin: '0 0' }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ScaledFrame({ spec, page, w = 1000, h = 640, interactive = false, live = false }: { spec: TplSpec; page: number; w?: number; h?: number; interactive?: boolean; live?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [k, setK] = useState(0.3);
   useEffect(() => {
@@ -29,7 +61,7 @@ function ScaledFrame({ spec, page, w = 1000, h = 640, interactive = false }: { s
     <div ref={ref} className="relative w-full overflow-hidden bg-bg" style={{ height: h * k }}>
       <iframe
         title={spec.name + ' ' + (spec.pages[page] || '')}
-        srcDoc={pageHtml(spec, page)}
+        srcDoc={live ? liveHtml(spec) : pageHtml(spec, page)}
         loading="lazy"
         sandbox=""
         tabIndex={-1}
@@ -150,16 +182,33 @@ export default function TemplatesPage({ account, onClose, onPreview, onBuy }: Pr
             {!loading && !error && shown.length === 0 && <p className="py-10 text-center text-sm text-faint">No templates match.</p>}
             <div className="mx-auto grid max-w-[1600px] grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {shown.map((t) => (
-                <button
+                <div
                   key={t.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setOpen(t)}
-                  className="group overflow-hidden rounded-xl border border-line bg-panel text-left transition duration-300 hover:-translate-y-0.5 hover:border-volt/50 hover:shadow-glow"
+                  onKeyDown={(e) => e.key === 'Enter' && setOpen(t)}
+                  className="group cursor-pointer overflow-hidden rounded-xl border border-line bg-panel text-left transition duration-300 hover:-translate-y-0.5 hover:border-volt/50 hover:shadow-glow"
                 >
                   <div className="relative aspect-[16/10] overflow-hidden bg-raised">
-                    {t.spec ? <ScaledFrame spec={t.spec} page={coverPage(t.spec)} /> : <img src={t.thumbnail_url} alt={t.name} loading="lazy" className="h-full w-full object-cover" />}
+                    {t.spec && hasLive(t.spec) ? <LiveCard spec={t.spec} /> : t.spec ? <ScaledFrame spec={t.spec} page={coverPage(t.spec)} /> : <img src={t.thumbnail_url} alt={t.name} loading="lazy" className="h-full w-full object-cover" />}
                     <span className="absolute right-2 top-2 grid h-6 w-6 place-items-center rounded-md bg-black/55 text-volt">
                       <Lock size={12} />
                     </span>
+                    <div className="absolute inset-x-0 bottom-0 flex gap-2 bg-gradient-to-t from-black/80 to-transparent p-2 pt-8 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100 max-sm:opacity-100">
+                      <span className="flex flex-1 items-center justify-center gap-1 rounded-md border border-white/25 bg-black/50 py-1.5 text-xs font-medium text-white">
+                        <Eye size={12} /> Live Preview
+                      </span>
+                      <span
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          use(t, 'use');
+                        }}
+                        className="flex flex-1 items-center justify-center gap-1 rounded-md bg-volt py-1.5 text-xs font-semibold text-volt-ink"
+                      >
+                        {copied === t.id + 'use' ? <Check size={12} /> : <Lock size={12} />} Use Template
+                      </span>
+                    </div>
                   </div>
                   <div className="p-3">
                     <h3 className="truncate text-sm font-semibold">{t.name}</h3>
@@ -170,7 +219,7 @@ export default function TemplatesPage({ account, onClose, onPreview, onBuy }: Pr
                       </span>
                     </div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -183,8 +232,9 @@ export default function TemplatesPage({ account, onClose, onPreview, onBuy }: Pr
             <div className="overflow-hidden rounded-xl border border-line bg-panel">
               {open.spec ? (
                 <>
-                  <div className="flex gap-1 overflow-x-auto border-b border-line bg-raised p-2">
-                    {open.spec.pages.map((p, i) => (
+                  <div className="flex items-center gap-1 overflow-x-auto border-b border-line bg-raised p-2">
+                    {hasLive(open.spec) && <span className="px-2 text-xs text-muted">Live site · scroll and tap the sections</span>}
+                    {!hasLive(open.spec) && open.spec.pages.map((p, i) => (
                       <button
                         key={p}
                         onClick={() => setPage(i)}
@@ -194,7 +244,7 @@ export default function TemplatesPage({ account, onClose, onPreview, onBuy }: Pr
                       </button>
                     ))}
                   </div>
-                  <ScaledFrame spec={open.spec} page={page} w={1100} h={720} />
+                  <ScaledFrame spec={open.spec} page={page} w={1100} h={720} live={hasLive(open.spec)} interactive={hasLive(open.spec)} />
                 </>
               ) : (
                 <img src={open.thumbnail_url} alt={open.name} className="aspect-[16/10] w-full object-cover" />

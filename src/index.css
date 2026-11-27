@@ -2,6 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --c-bg: 10 13 12;
+  --c-panel: 16 20 18;
+  --c-raised: 22 27 24;
+  --c-line: 35 42 38;
+  --c-line-strong: 51 60 55;
+  --c-fg: 233 238 234;
+  --c-muted: 152 163 157;
+  --c-faint: 117 128 122;
+  --c-volt: 200 245 74;
+  --c-volt-ink: 18 24 8;
+  --c-danger: 255 123 107;
+  --c-gold: 240 195 106;
+}
+
+:root.light {
+  --c-bg: 244 246 242;
+  --c-panel: 255 255 255;
+  --c-raised: 237 241 236;
+  --c-line: 221 226 220;
+  --c-line-strong: 197 204 197;
+  --c-fg: 19 24 21;
+  --c-muted: 91 102 95;
+  --c-faint: 111 122 115;
+  --c-volt: 77 124 15;
+  --c-volt-ink: 255 255 255;
+  --c-danger: 200 50 40;
+  --c-gold: 160 110 20;
+}
+
+html.light body {
+  background:
+    radial-gradient(900px 500px at 50% -10%, rgba(120, 180, 20, 0.14), transparent 60%),
+    radial-gradient(700px 480px at 100% 110%, rgba(120, 90, 255, 0.08), transparent 60%),
+    #f4f6f2;
+  color: #131815;
+}
+
+html.light * {
+  scrollbar-color: #c5ccc5 transparent;
+}
+
+html.light :focus-visible {
+  outline-color: #4d7c0f;
+}
+
 html,
 body,
 #root {

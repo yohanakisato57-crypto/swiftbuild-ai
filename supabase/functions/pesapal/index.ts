@@ -9,7 +9,7 @@ const PACKS: Record<number, { credits: number; price: number }> = {
   10: { credits: 40, price: 5 },
   11: { credits: 100, price: 15 },
   12: { credits: 350, price: 35 },
-  13: { credits: 1000, price: 75 },
+  13: { credits: 800, price: 75 },
 };
 
 // deno-lint-ignore no-explicit-any

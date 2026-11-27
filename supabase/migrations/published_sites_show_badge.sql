@@ -1,0 +1,1 @@
+ALTER TABLE published_sites ADD COLUMN IF NOT EXISTS show_badge boolean NOT NULL DEFAULT true;
