@@ -172,12 +172,19 @@ export interface BuildJob {
   status: 'queued' | 'planning' | 'writing' | 'done' | 'error';
   stage: string | null;
   current_step?: string | null;
+  agent_status?: { state?: Record<string, string>; msg?: Record<string, string>; delivery?: Record<string, string> } | null;
   title: string | null;
   total_files: number;
   done_files: number;
   cost: number;
+  owed_credits?: number;
   error: string | null;
   project_id: number | string | null;
+}
+
+/** Pays the credits owed for a finished-but-locked project and returns its files. */
+export async function unlockBuild(jobId: string): Promise<{ files?: { name: string; lang: string; content: string }[]; credits?: number; owed?: number; status?: number; error?: string }> {
+  return fn('build-app', { action: 'unlock', jobId }) as Promise<{ files?: { name: string; lang: string; content: string }[]; credits?: number; owed?: number; status?: number; error?: string }>;
 }
 export interface BuildFile {
   idx: number;

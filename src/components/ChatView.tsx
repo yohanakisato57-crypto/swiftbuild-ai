@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { playChime } from '../lib/chime';
 import { ArrowLeft, Code2, Copy, Download, Eye, FileCode2, MessageCircle, MessageSquare } from 'lucide-react';
-import { streamGenerate, startBuild, pollBuild, resumeBuild, supabase, type Account, type BuildFile } from '../lib/auth';
+import { streamGenerate, startBuild, pollBuild, resumeBuild, unlockBuild, supabase, type Account, type BuildFile } from '../lib/auth';
 import { estimateCost } from '../lib/costs';
 import type { Project, ProjectFile } from '../lib/generator';
 import { downloadZip, loadMessages, saveMessage, type ChatMessage, type ChatSession } from '../lib/chat';
@@ -9,7 +9,7 @@ import { previewDoc } from '../lib/preview';
 import Composer, { type UiMode } from './Composer';
 import PublishMenu from './PublishMenu';
 import LivePreviewCard from './LivePreviewCard';
-import PipelineCard from './PipelineCard';
+import PipelineCard, { type AgentStatus } from './PipelineCard';
 
 const BASE_HTML = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;min-height:100vh;background:#0b0f0d;color:#9aa8a0;font:14px ui-sans-serif,system-ui,sans-serif}#root:empty::before{content:"Starting your app…";display:grid;place-items:center;height:100vh}</style></head><body><div id="root"></div></body></html>';
 const BASE_FILE: ProjectFile = { name: 'index.html', lang: 'html', content: BASE_HTML } as ProjectFile;
@@ -37,6 +37,11 @@ interface Props {
 
 type Pane = 'chat' | 'preview' | 'code';
 
+function lockedInfo(c: string): { jobId: string; owed: number } | null {
+  const m = /^\[LOCKED:([^:\]]+):(\d+)\]/.exec(c);
+  return m ? { jobId: m[1], owed: Number(m[2]) } : null;
+}
+
 export default function ChatView({ account, session, firstPrompt, firstMode, onClose, onCredits, onBuy, onProject, notify }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -52,8 +57,10 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
   const quickRef = useRef<HTMLInputElement>(null);
   const [, setActiveJob] = useState<string | null>(null);
   const [liveFiles, setLiveFiles] = useState<BuildFile[]>([]);
-  const [liveStep, setLiveStep] = useState<string | null>('orchestrator');
+  const [liveAgents, setLiveAgents] = useState<AgentStatus | null>(null);
   const [liveProj, setLiveProj] = useState<ProjectFile[]>([]);
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlocked, setUnlocked] = useState<string[]>([]);
   const credits = useRef(account.credits);
   const started = useRef(false);
   const alive = useRef(true);
@@ -201,9 +208,9 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
           const doneNow = (r.files || []).filter((f) => f.status === 'done').length;
           if (doneNow > lastDone) { lastDone = doneNow; resumes = 0; retries = 0; } // progress made: reset stall counters
           setLiveFiles(r.files || []);
-          if (r.job?.current_step) setLiveStep(r.job.current_step);
+          if (r.job?.agent_status) setLiveAgents(r.job.agent_status);
           if (files.length) setLiveProj(files.some((f) => f.name === 'index.html' && f.content.trim()) ? files : [BASE_FILE, ...files]);
-          if (files.length) onProject({ title: r.job?.title || session.title, mode: 'build', files });
+          if (files.length && r.job?.status !== 'done') onProject({ title: r.job?.title || session.title, mode: 'build', files });
           if (r.job?.status === 'error') {
             // A file failed: keep everything already written and continue only the missing files (up to 3 times).
             if (retries < 3) {
@@ -226,6 +233,17 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
           if (r.job?.status === 'done') {
             const doneFiles = files;
             const cost = r.job.cost;
+            const owed = r.job.owed_credits || 0;
+            if (owed > 0) {
+              if (localStorage.getItem('sb_job_saved_' + jobId)) break;
+              localStorage.setItem('sb_job_saved_' + jobId, '1');
+              const lockedReply: Omit<ChatMessage, 'id'> = { role: 'assistant', mode: 'build', content: `[LOCKED:${jobId}:${owed}]Project “${r.job.title || session.title}” imekamilika (${doneFiles.length} files), lakini imesitishwa kwa sababu salio halitoshi. Lipia credits ${owed} ili kuifungua.`, files: null, title: r.job.title, cost: 0 };
+              setMessages((p) => [...p, { ...lockedReply, id: 'a' + Date.now() }]);
+              void saveMessage(account.id, session.id, lockedReply);
+              notify('Project imekamilika. Lipia ili kuifungua.');
+              playChime();
+              break;
+            }
             if (typeof r.job.project_id !== 'undefined') onProject({ id: r.job.project_id ?? undefined, title: r.job.title || session.title, mode: 'build', files: doneFiles });
             const { data: bal } = await supabase.from('profiles').select('credits').eq('id', account.id).single();
             if (bal) onCredits(bal.credits as number);
@@ -256,6 +274,28 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
     [account.id, history, notify, onBuy, onCredits, onProject, session.id, session.title],
   );
 
+  const payUnlock = useCallback(
+    async (jobId: string) => {
+      setUnlocking(true);
+      const r = await unlockBuild(jobId);
+      setUnlocking(false);
+      if (r.status === 402) {
+        notify(r.error || 'Salio halitoshi. Nunua credits ili kufungua.');
+        onBuy();
+        return;
+      }
+      if (!r.files) return void notify(r.error || 'Imeshindikana kufungua.');
+      if (typeof r.credits === 'number') onCredits(r.credits);
+      setUnlocked((u) => [...u, jobId]);
+      onProject({ title: session.title, mode: 'build', files: r.files as ProjectFile[] });
+      setFileIdx(0);
+      notify('Project imefunguliwa.');
+      setPane('preview');
+      setView('preview');
+    },
+    [notify, onBuy, onCredits, onProject, session.title],
+  );
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -264,7 +304,8 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
     async (prompt: string, m: UiMode) => {
       const base = estimateCost(prompt);
       const est = m === 'build' ? base : { heavy: false, cost: m === 'chat' ? 0 : Math.min(base.cost, 2) };
-      if (credits.current < est.cost) {
+      // Builds may start with a low balance: the project finishes, then stays locked until paid.
+      if (credits.current < (m === 'build' ? Math.min(est.cost, 2) : est.cost)) {
         notify(`You need ${est.cost} credits for this. Top up to continue.`);
         onBuy();
         return;
@@ -402,7 +443,16 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
                     m.role === 'user' ? 'rounded-br-md bg-volt text-volt-ink' : 'rounded-bl-md border border-line bg-panel'
                   }`}
                 >
-                  {m.content}
+                  {m.content.replace(/^\[LOCKED:[^\]]*\]/, '')}
+                  {m.role === 'assistant' && lockedInfo(m.content) && !unlocked.includes(lockedInfo(m.content)!.jobId) && (
+                    <button
+                      onClick={() => void payUnlock(lockedInfo(m.content)!.jobId)}
+                      disabled={unlocking}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg bg-volt px-3 py-2 text-xs font-semibold text-volt-ink transition hover:opacity-90 disabled:opacity-60"
+                    >
+                      {unlocking ? 'Inafungua…' : `Lipia na ufungue · ${lockedInfo(m.content)!.owed} credits`}
+                    </button>
+                  )}
                   {m.role === 'assistant' && m.files && (
                     <button
                       onClick={() => { setPane('preview'); setView('preview'); }}
@@ -418,7 +468,7 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
             ))}
 
             {/* Inline loading state under the prompt — the chat stays visible. */}
-            {building && mode === 'build' && <PipelineCard step={liveStep} />}
+            {building && mode === 'build' && <PipelineCard agents={liveAgents} />}
             {building && mode === 'build' && liveProj.length > 0 && <LivePreviewCard files={liveProj} steps={liveFiles} title={session.title} />}
             {building && mode !== 'build' && (
               <p className="text-xs text-muted">{mode === 'plan' ? 'Writing the plan…' : 'Thinking…'}</p>

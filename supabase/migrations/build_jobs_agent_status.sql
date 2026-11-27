@@ -1,0 +1,1 @@
+alter table public.build_jobs add column if not exists agent_status jsonb;

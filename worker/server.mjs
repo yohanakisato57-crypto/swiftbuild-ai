@@ -4,6 +4,8 @@
 import http from 'node:http';
 import { createClient } from '@supabase/supabase-js';
 import { collectCompletion, looksComplete, parseJsonStrict, stripFence } from './sse.mjs';
+import { BACKEND_SYSTEM, REVIEW_SYSTEM, TEST_SYSTEM, runTests, staticCheck } from './agents.mjs';
+import { runSandbox } from './sandbox.mjs';
 
 const env = process.env;
 const PORT = Number(env.PORT || 8787);
@@ -20,7 +22,7 @@ for (const k of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OPENAI_API_KEY'])
 }
 const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
-const PLAN_SYSTEM = `You are SwiftBuild AI's architect. Break the user's request into a set of separate files (3 to ${MAX_FILES} files), so each file can be written on its own. Good examples: index.html, styles.css, app.js, components like Sidebar.js, GameBoard.js, PricingCard.js, GameLogic.js, data.js. Keep each file focused on one job. Plain HTML/CSS/vanilla JavaScript only, no build tools, no npm. First classify the request: "quick_edit" (a small tweak or tiny single-page change) or "full_build" (a new or large project). For quick_edit list only index.html. Reply ONLY JSON: {"mode": "quick_edit"|"full_build", "title": string (max 5 words), "files": [{"name": string, "lang": "html"|"css"|"js", "purpose": string (one sentence)}]}. The first file must be index.html, which loads every other file (CSS via <link>, JS via <script src>).`;
+const PLAN_SYSTEM = `You are SwiftBuild AI's architect. Break the user's request into a set of separate files (3 to ${MAX_FILES} files), so each file can be written on its own. Good examples: index.html, styles.css, app.js, components like Sidebar.js, GameBoard.js, PricingCard.js, GameLogic.js, data.js. Keep each file focused on one job. Plain HTML/CSS/vanilla JavaScript only, no build tools, no npm. First classify the request: "quick_edit" (a small tweak or tiny single-page change) or "full_build" (a new or large project). For quick_edit list only index.html. Also decide "backend": true only if the project needs saved data, accounts, forms that store data, or API/WhatsApp integrations (a data layer file data.js will then be written by a separate Backend Agent; do not list data.js yourself). Reply ONLY JSON: {"mode": "quick_edit"|"full_build", "backend": boolean, "title": string (max 5 words), "files": [{"name": string, "lang": "html"|"css"|"js", "purpose": string (one sentence)}]}. The first file must be index.html, which loads every other file (CSS via <link>, JS via <script src>).`;
 const FILE_SYSTEM = `You are SwiftBuild AI, an expert front-end engineer. Write ONE complete file for the project described. The file must be real, working, polished and responsive, with real specific content for the user's request, never lorem ipsum, never a placeholder. Other files in the same project are listed for context; reference them by exact name. Reply with ONLY the raw complete file text: no JSON, no markdown fences, no commentary. No code comments. Never stop early and never leave a section unfinished.
 QUALITY BAR: build a complete, premium, fully working interactive single-page app on the level of Bolt.new and Lovable, never a short page of a few lines. Rules:
 - Load Tailwind CSS from https://cdn.tailwindcss.com, Lucide icons from https://unpkg.com/lucide@latest (call lucide.createIcons() after every render), and Google Fonts (Plus Jakarta Sans for headings, Inter for body) in index.html.
@@ -107,8 +109,14 @@ const running = new Set();
 async function runJob(jobId, rules) {
   if (running.has(jobId)) return;
   running.add(jobId);
-  const setJob = (patch) => db.from('build_jobs').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', jobId);
+  const setJob = async (patch) => { await db.from('build_jobs').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', jobId); };
   const beat = setInterval(() => { void setJob({}); }, 8000);
+  // Real per-agent status, written to build_jobs.agent_status and read by the Chat pipeline card.
+  const AG = { planning: 'pending', coding: 'pending', review: 'pending', backend: 'pending', debug: 'pending', testing: 'pending', engine: 'pending', preview: 'pending' };
+  const AGMSG = {};
+  // Distinct delivery states: code generated / build / tests / preview loaded / deployed. Each is set only from real evidence.
+  const DEL = { generated: 'pending', build: 'pending', tests: 'pending', preview: 'pending', deployed: 'not_deployed' };
+  const ag = (k, s, m) => { AG[k] = s; if (m !== undefined) AGMSG[k] = String(m).slice(0, 240); return setJob({ agent_status: { state: { ...AG }, msg: { ...AGMSG }, delivery: { ...DEL } } }); };
   try {
     const { data: job } = await db.from('build_jobs').select('*').eq('id', jobId).single();
     if (!job || job.status === 'done' || job.status === 'error') return;
@@ -118,7 +126,8 @@ async function runJob(jobId, rules) {
     let title = String(job.title || 'New project');
 
     if (!rows || rows.length === 0) {
-      await setJob({ status: 'planning', stage: 'AI Orchestrator & Planning AI', current_step: 'orchestrator' });
+      await setJob({ status: 'planning', stage: 'Planning Agent', current_step: 'orchestrator' });
+      await ag('planning', 'running', 'Analysing your request and planning files');
       let plan = null, planErr = null;
       for (let a = 1; a <= 3 && !plan; a++) {
         try { plan = parseJsonStrict(await streamText(PLAN_SYSTEM + rules, prompt, 800, true, PLAN_MODEL)); } catch (e) { planErr = e; }
@@ -128,13 +137,20 @@ async function runJob(jobId, rules) {
       const planned = (plan.files || []).filter((f) => f && typeof f.name === 'string').slice(0, quick ? 1 : MAX_FILES)
         .map((f) => ({ name: cleanName(f.name), lang: LANG_OF(String(f.name)), purpose: String(f.purpose || '').slice(0, 200) }));
       if (!planned.some((f) => f.name === 'index.html')) throw new Error('The planner returned no index.html.');
+      // Central Orchestrator: the Backend Agent only runs for full builds that need a data layer.
+      if (!quick && plan.backend === true && !planned.some((f) => f.name === 'data.js')) {
+        planned.push({ name: 'data.js', lang: 'js', purpose: 'Data layer (window.AppData): storage, validation and integrations. Load it with <script src="data.js"></script> BEFORE other scripts and use window.AppData.' });
+      }
+      await ag('planning', 'done', `${quick ? 'Quick Edit' : 'Full Build'}: ${planned.length} file(s) planned${planned.some((f) => f.name === 'data.js') ? ', backend needed' : ''}`);
       title = String(plan.title || 'New project').slice(0, 60);
       await db.from('build_files').insert(planned.map((f, i) => ({ job_id: jobId, user_id: userId, idx: i, name: f.name, lang: f.lang, purpose: f.purpose, status: 'pending', content: f.name === 'index.html' ? baseHtml(title) : null })));
       await setJob({ status: 'writing', stage: 'Coding Agent & Backend Manager', current_step: 'coding', title, total_files: planned.length });
       ({ data: rows } = await db.from('build_files').select('idx,name,lang,purpose,status,content').eq('job_id', jobId).order('idx'));
     } else {
       await setJob({ status: 'writing', stage: 'Resuming build', current_step: 'coding' });
+      await ag('planning', 'done', 'Plan restored from saved files');
     }
+    const hasBackend = (rows || []).some((f) => f.name === 'data.js');
 
     const all = rows || [];
     const manifest = all.map((f) => `- ${f.name}: ${f.purpose}`).join('\n');
@@ -152,7 +168,7 @@ async function runJob(jobId, rules) {
             await setJob({ stage: `Retrying ${f.name} (attempt ${attempt}/4)` });
             await new Promise((r) => setTimeout(r, 1500 * (attempt - 1)));
           }
-          content = stripFence(await streamText(FILE_SYSTEM + rules, user, 16000, false, CODE_MODEL));
+          content = stripFence(await streamText((f.name === 'data.js' && hasBackend ? BACKEND_SYSTEM : FILE_SYSTEM) + rules, user, 16000, false, CODE_MODEL));
           if (f.name === 'index.html') content = ensureHtml(content, title);
           if (!looksComplete(f.name, content)) throw new Error(`${f.name} looks truncated or empty.`);
           lastErr = null;
@@ -167,35 +183,144 @@ async function runJob(jobId, rules) {
       await db.from('build_files').update({ content, status: 'done' }).eq('job_id', jobId).eq('idx', f.idx);
       await setJob({ done_files: written.length });
     };
-    const results = await Promise.allSettled(all.map(writeOne));
-    const failed = results.find((r) => r.status === 'rejected');
+    // Coding Agent and Backend Agent run in parallel on disjoint files (no shared file is written twice).
+    const group = async (key, list, label) => {
+      if (!list.length) { await ag(key, 'skipped', 'Not needed for this request'); return []; }
+      await ag(key, 'running', label);
+      const rs = await Promise.allSettled(list.map(writeOne));
+      const bad = rs.find((r) => r.status === 'rejected');
+      await ag(key, bad ? 'failed' : 'done', bad ? bad.reason?.message : `${list.length} file(s) written`);
+      return rs;
+    };
+    const isBE = (f) => hasBackend && f.name === 'data.js';
+    const groups = await Promise.all([
+      group('coding', all.filter((f) => !isBE(f)), 'Writing pages, components and styles'),
+      group('backend', all.filter(isBE), 'Writing the data layer and integrations'),
+    ]);
+    const failed = groups.flat().find((r) => r.status === 'rejected');
     if (failed) throw failed.reason;
     written.sort((a, b) => all.findIndex((x) => x.name === a.name) - all.findIndex((x) => x.name === b.name));
 
-    // Step 3: Debug Agent & Build Test Engine. Best effort: a failed check keeps the original file.
-    await setJob({ stage: 'Debug & Build Engine', current_step: 'debug' });
-    await Promise.allSettled(written.map(async (w) => {
+    // Review Agent: skipped for light edits (one file) to save time and cost.
+    const light = written.length <= 1;
+    let issues = [];
+    if (light) {
+      await ag('review', 'skipped', 'Quick Edit: lightweight path');
+    } else {
+      await setJob({ stage: 'Review Agent', current_step: 'debug' });
+      await ag('review', 'running', 'Reviewing code against the plan');
       try {
-        const out = stripFence(await streamText(DEBUG_SYSTEM, `File: ${w.name}\nOther files:\n${manifest}\n\n${w.content}`, 16000, false, DEBUG_MODEL));
-        if (!out || /^OK\.?$/i.test(out.trim())) return;
-        if (out.length < w.content.length * 0.7 || !looksComplete(w.name, out)) return;
-        w.content = w.name === 'index.html' ? ensureHtml(out, title) : out;
-        await db.from('build_files').update({ content: w.content }).eq('job_id', jobId).eq('name', w.name);
-      } catch { /* keep original */ }
-    }));
-    await setJob({ stage: 'Live Preview Ready', current_step: 'preview' });
+        const body = written.map((w) => `=== ${w.name} ===\n${w.content.slice(0, 12000)}`).join('\n\n');
+        const rv = parseJsonStrict(await streamText(REVIEW_SYSTEM, `Request: ${prompt}\n\nPlan:\n${manifest}\n\n${body}`, 1200, true, PLAN_MODEL));
+        issues = (Array.isArray(rv.issues) ? rv.issues : []).filter((i) => i && written.some((w) => w.name === i.file)).slice(0, 6).map((i) => ({ file: i.file, problem: String(i.problem || '').slice(0, 300) }));
+        await ag('review', 'done', issues.length ? `${issues.length} issue(s) sent to the Debug Agent` : 'Approved: code matches the plan');
+      } catch (e) {
+        await ag('review', 'failed', `Review could not complete: ${e.message}`);
+      }
+    }
 
+    // Debug Agent: real syntax/reference checks plus review issues; max 2 repair rounds, never keeps a worse file.
+    await setJob({ stage: 'Debug Agent', current_step: 'debug' });
+    DEL.generated = 'passed';
+    await ag('debug', 'running', 'Checking syntax, references and runtime errors');
+    await ag('engine', 'running', 'Sandbox: installing dependencies, building, serving and running the app');
+    let sb = await runSandbox(written);
+    const sbProblems = () => (sb.infra ? [] : sb.problems);
+    let problems = [...issues, ...staticCheck(written), ...sbProblems()];
+    const firstCount = problems.length;
+    let lastSig = '';
+    for (let round = 1; round <= 2 && problems.length; round++) {
+      const sig = problems.map((p) => `${p.file}|${p.problem}`).sort().join('\n');
+      if (sig === lastSig) break; // the last repair changed nothing: do not loop
+      lastSig = sig;
+      await ag('debug', 'running', `Repair round ${round}/2: ${problems.length} problem(s)`);
+      const byFile = new Map();
+      for (const p of problems) byFile.set(p.file, [...(byFile.get(p.file) || []), p.problem]);
+      await Promise.allSettled([...byFile].map(async ([name, list]) => {
+        const w = written.find((x) => x.name === name);
+        if (!w) return;
+        try {
+          const out = stripFence(await streamText(DEBUG_SYSTEM, `File: ${name}\nProblems found (fix exactly these, change nothing unrelated):\n- ${list.join('\n- ')}\nOther files:\n${manifest}\n\n${w.content}`, 16000, false, DEBUG_MODEL));
+          if (!out || /^OK\.?$/i.test(out.trim())) return;
+          if (out.length < w.content.length * 0.7 || !looksComplete(name, out)) return;
+          const next = name === 'index.html' ? ensureHtml(out, title) : out;
+          const others = written.filter((x) => x.name !== name);
+          if (staticCheck([...others, { name, content: next }]).length > staticCheck(written).length) return;
+          w.content = next;
+          await db.from('build_files').update({ content: next }).eq('job_id', jobId).eq('name', name);
+        } catch { /* keep the working version */ }
+      }));
+      await ag('engine', 'running', `Sandbox: re-running build and tests after repair ${round}/2`);
+      sb = await runSandbox(written);
+      problems = [...staticCheck(written), ...sbProblems()];
+    }
+    const remaining = [...staticCheck(written), ...sbProblems()];
+    await ag('debug', remaining.length ? 'failed' : 'done', remaining.length ? `${remaining.length} problem(s) remain: ${remaining[0].file}: ${remaining[0].problem}` : firstCount ? `Fixed ${firstCount} problem(s)` : 'No errors found');
+
+    // Testing Agent: automated tests are authoritative; the AI only reports on user flows.
+    await setJob({ stage: 'Testing Agent', current_step: 'debug' });
+    await ag('testing', 'running', 'Running automated checks');
+    const tr = runTests(written);
+    let flowNote = '';
+    if (!light) {
+      try {
+        const idx = written.find((w) => w.name === 'index.html');
+        const res = parseJsonStrict(await streamText(TEST_SYSTEM, `Automated results:\n${tr.checks.map((c) => `${c.ok ? 'PASS' : 'FAIL'} ${c.name}`).join('\n')}\n\nFiles: ${written.map((w) => w.name).join(', ')}\n\nindex.html:\n${(idx?.content || '').slice(0, 14000)}`, 900, true, PLAN_MODEL));
+        const flows = Array.isArray(res.flows) ? res.flows : [];
+        const bad = flows.filter((f) => f && f.ok === false);
+        flowNote = ` Flows: ${flows.length - bad.length}/${flows.length} wired${bad[0] ? ` (not wired: ${String(bad[0].name).slice(0, 60)})` : ''}.`;
+      } catch { /* flow report is optional */ }
+    }
+    const passedN = tr.checks.filter((c) => c.ok).length;
+    // Real execution evidence decides delivery. Generated code alone is never "success".
+    const rt = sb.runtime || {};
+    const buildOk = !sb.infra && !(sb.install?.ran && !sb.install.ok) && !(sb.build?.ran && !sb.build.ok);
+    DEL.build = buildOk ? 'passed' : 'failed';
+    const sandboxNote = sb.infra ? sb.problems[0].problem : `Sandbox: HTTP ${sb.http?.index ?? '-'}, ${sb.http?.assets ?? 0} local assets, CDN ${sb.http?.cdn ?? 'n/a'}, ${rt.clicks ?? 0} clicks, ${rt.inputs ?? 0} inputs, ${rt.errors ?? 0} runtime error(s).`;
+    const testsOk = tr.passed && sb.ok;
+    DEL.tests = testsOk ? 'passed' : 'failed';
+    await ag('testing', testsOk ? 'done' : 'failed', `${passedN}/${tr.checks.length} static checks.${flowNote} ${sandboxNote}`);
+    if (!testsOk) {
+      const all = [...tr.probs, ...sbProblems()];
+      const first = (all[0] ? `${all[0].file}: ${all[0].problem}` : sb.infra ? sb.problems[0].problem : 'Automated tests failed.');
+      await ag('engine', 'failed', sb.infra ? first : `Build/tests failed after the repair attempts. ${first}`);
+      DEL.preview = 'failed';
+      await ag('preview', 'pending', 'Not verified: the build or tests failed');
+      throw new Error(`Build or tests failed after 2 repair attempts, so this project was not delivered. Error: ${first}. Your generated files are kept as a draft and you were not charged.`);
+    }
+    await ag('engine', 'done', sandboxNote);
+
+    // Preview verification BEFORE any charge: read the stored files back and run them through the preview server again.
+    await ag('preview', 'running', 'Loading the saved project from storage over HTTP');
+    const { data: saved } = await db.from('build_files').select('name,content').eq('job_id', jobId);
+    const pv = await runSandbox((saved || []).map((s) => ({ name: s.name, content: s.content || '' })));
+    if (!pv.ok) {
+      DEL.preview = 'failed';
+      const why = pv.problems[0]?.problem || 'unknown error';
+      await ag('preview', 'failed', `Preview did not load: ${why}`);
+      throw new Error(`Preview verification failed: ${why}. Your generated files are kept as a draft and you were not charged.`);
+    }
+    DEL.preview = 'passed';
     // Charge only after success, never more than the balance.
     const { data: prof } = await db.from('profiles').select('credits').eq('id', userId).single();
-    const cost = Math.max(0, Math.min(buildCost(prompt, written), prof?.credits ?? 0));
+    const fullCost = Math.max(0, buildCost(prompt, written));
+    const owed = fullCost > (prof?.credits ?? 0) ? fullCost : 0;
+    const cost = owed ? 0 : fullCost;
     if (cost > 0) {
       const { data: balance } = await db.rpc('adjust_credits', { p_user: userId, p_delta: -cost, p_reason: `Build: ${prompt.slice(0, 60)}` });
       if (balance === null || balance === undefined) throw new Error('Not enough credits. You were not charged.');
     }
-    const files = written.map((w) => ({ name: w.name, lang: w.lang, content: w.content }));
-    const { data: row } = await db.from('projects').insert({ user_id: userId, title, prompt, mode: 'build', files, cost }).select('id').single();
-    await setJob({ status: 'done', stage: 'Finished', current_step: 'done', cost, project_id: row?.id ?? null, title });
+    // Not enough credits: the project is finished but locked until the user pays.
+    const files = owed ? [] : written.map((w) => ({ name: w.name, lang: w.lang, content: w.content }));
+    await setJob({ stage: 'Project Execution Engine', current_step: 'preview' });
+    await ag('engine', 'running', 'Saving the verified project');
+    const { data: row, error: saveErr } = await db.from('projects').insert({ user_id: userId, title, prompt, mode: 'build', files, cost, owed_credits: owed }).select('id').single();
+    if (saveErr || !row) throw new Error(`Saving the project failed: ${saveErr?.message || 'no row returned'}`);
+    await ag('engine', 'done', `${written.length} file(s) built, tested in the sandbox and saved. ${sandboxNote}`);
+    await ag('preview', 'done', `Verified: saved files served over HTTP and loaded (${pv.runtime?.elements ?? 0} elements, ${pv.runtime?.errors ?? 0} errors).${owed ? ' Locked until the owed credits are paid.' : ''}`);
+    await setJob({ status: 'done', stage: 'Finished', current_step: 'done', cost, owed_credits: owed, project_id: row?.id ?? null, title });
   } catch (err) {
+    for (const k of Object.keys(AG)) if (AG[k] === 'running') { try { await ag(k, 'failed', err.message || 'Build failed.'); } catch { /* ignore */ } }
     await setJob({ status: 'error', error: err.message || 'Build failed.', stage: 'Stopped' });
   } finally {
     clearInterval(beat);
@@ -217,6 +342,21 @@ async function handle(b, user) {
     if (!job) return [404, { error: 'Build not found.' }];
     const { data: files } = await db.from('build_files').select('idx,name,lang,purpose,status,content').eq('job_id', jobId).order('idx');
     return [200, { job, files: files || [] }];
+  }
+  if (action === 'unlock') {
+    const jobId = String(b.jobId || '');
+    const { data: job } = await db.from('build_jobs').select('id,owed_credits,project_id,prompt').eq('id', jobId).eq('user_id', user.id).maybeSingle();
+    if (!job) return [404, { error: 'Build not found.' }];
+    const { data: files } = await db.from('build_files').select('idx,name,lang,content').eq('job_id', jobId).order('idx');
+    const out = (files || []).map((f) => ({ name: f.name, lang: f.lang, content: f.content || '' }));
+    if (!(job.owed_credits > 0)) return [200, { files: out, unlocked: true }];
+    const { data: prof } = await db.from('profiles').select('credits').eq('id', user.id).single();
+    if (!prof || prof.credits < job.owed_credits) return [402, { error: `You need ${job.owed_credits} credits to unlock this project.`, owed: job.owed_credits, credits: prof?.credits ?? 0, status: 402 }];
+    const { data: balance } = await db.rpc('adjust_credits', { p_user: user.id, p_delta: -job.owed_credits, p_reason: `Unlock: ${String(job.prompt || '').slice(0, 60)}` });
+    if (balance === null || balance === undefined) return [402, { error: 'Not enough credits.', owed: job.owed_credits, status: 402 }];
+    if (job.project_id) await db.from('projects').update({ files: out, cost: job.owed_credits, owed_credits: 0 }).eq('id', job.project_id);
+    await db.from('build_jobs').update({ cost: job.owed_credits, owed_credits: 0 }).eq('id', jobId);
+    return [200, { files: out, unlocked: true, credits: balance }];
   }
   if (action === 'resume') {
     const jobId = String(b.jobId || '');
