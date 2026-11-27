@@ -21,7 +21,14 @@ for (const k of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'OPENAI_API_KEY'])
 const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
 const PLAN_SYSTEM = `You are SwiftBuild AI's architect. Break the user's request into a set of separate files (3 to ${MAX_FILES} files), so each file can be written on its own. Good examples: index.html, styles.css, app.js, components like Sidebar.js, GameBoard.js, PricingCard.js, GameLogic.js, data.js. Keep each file focused on one job. Plain HTML/CSS/vanilla JavaScript only, no build tools, no npm. First classify the request: "quick_edit" (a small tweak or tiny single-page change) or "full_build" (a new or large project). For quick_edit list only index.html. Reply ONLY JSON: {"mode": "quick_edit"|"full_build", "title": string (max 5 words), "files": [{"name": string, "lang": "html"|"css"|"js", "purpose": string (one sentence)}]}. The first file must be index.html, which loads every other file (CSS via <link>, JS via <script src>).`;
-const FILE_SYSTEM = `You are SwiftBuild AI, an expert front-end engineer. Write ONE complete file for the project described. The file must be real, working, polished and responsive, with real specific content for the user's request, never lorem ipsum, never a placeholder. Other files in the same project are listed for context; reference them by exact name. Reply with ONLY the raw complete file text: no JSON, no markdown fences, no commentary. Keep code concise, no comments. For data files include at most 12 short entries.`;
+const FILE_SYSTEM = `You are SwiftBuild AI, an expert front-end engineer. Write ONE complete file for the project described. The file must be real, working, polished and responsive, with real specific content for the user's request, never lorem ipsum, never a placeholder. Other files in the same project are listed for context; reference them by exact name. Reply with ONLY the raw complete file text: no JSON, no markdown fences, no commentary. No code comments. Never stop early and never leave a section unfinished.
+QUALITY BAR: build a complete, premium, fully working interactive single-page app on the level of Bolt.new and Lovable, never a short page of a few lines. Rules:
+- Load Tailwind CSS from https://cdn.tailwindcss.com, Lucide icons from https://unpkg.com/lucide@latest (call lucide.createIcons() after every render), and Google Fonts (Plus Jakarta Sans for headings, Inter for body) in index.html.
+- Include: a modern sticky navigation bar, an eye-catching hero section, a search box plus category filter chips that really filter the items, 6 to 8 product/service cards with real high-quality photos from https://images.unsplash.com/photo-... (use real Unsplash photo URLs with ?auto=format&fit=crop&w=800&q=80), prices, discount badges, an interactive cart drawer (add, remove, quantity, running total, persisted in JavaScript state), and a complete footer. Add hover micro-interactions and responsive layout for mobile, tablet and desktop.
+- All behaviour is written in real JavaScript, with realistic specific content and data for the user's business.
+- If the user gives a phone or WhatsApp number, wire it in directly: every product gets an "Agiza kwa WhatsApp" / "Order on WhatsApp" button opening https://wa.me/<digits only, with country code>?text=<encodeURIComponent of a neat message with product name and price>, the cart has a checkout button sending the whole order list and total the same way, plus a green floating WhatsApp button fixed at bottom right.
+- Write ALL website text in the same language the user wrote in (if Swahili, pure natural Swahili everywhere: nav, buttons, cards, footer, messages).
+- If the project is split in several files, keep this behaviour but put it in the files assigned to it; index.html must still render a full page.`;
 
 const PLAN_MODEL = env.PLAN_MODEL || 'gpt-4o-mini';
 const CODE_MODEL = env.CODE_MODEL || 'gpt-4o';
@@ -145,7 +152,7 @@ async function runJob(jobId, rules) {
             await setJob({ stage: `Retrying ${f.name} (attempt ${attempt}/4)` });
             await new Promise((r) => setTimeout(r, 1500 * (attempt - 1)));
           }
-          content = stripFence(await streamText(FILE_SYSTEM + rules, user, 8000, false, CODE_MODEL));
+          content = stripFence(await streamText(FILE_SYSTEM + rules, user, 16000, false, CODE_MODEL));
           if (f.name === 'index.html') content = ensureHtml(content, title);
           if (!looksComplete(f.name, content)) throw new Error(`${f.name} looks truncated or empty.`);
           lastErr = null;
@@ -169,7 +176,7 @@ async function runJob(jobId, rules) {
     await setJob({ stage: 'Debug & Build Engine', current_step: 'debug' });
     await Promise.allSettled(written.map(async (w) => {
       try {
-        const out = stripFence(await streamText(DEBUG_SYSTEM, `File: ${w.name}\nOther files:\n${manifest}\n\n${w.content}`, 8000, false, DEBUG_MODEL));
+        const out = stripFence(await streamText(DEBUG_SYSTEM, `File: ${w.name}\nOther files:\n${manifest}\n\n${w.content}`, 16000, false, DEBUG_MODEL));
         if (!out || /^OK\.?$/i.test(out.trim())) return;
         if (out.length < w.content.length * 0.7 || !looksComplete(w.name, out)) return;
         w.content = w.name === 'index.html' ? ensureHtml(out, title) : out;
