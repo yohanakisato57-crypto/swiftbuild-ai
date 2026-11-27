@@ -244,13 +244,14 @@ const readBody = (req) => new Promise((res) => {
 });
 
 http.createServer(async (req, res) => {
+  const cors = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-client-info, apikey',
+  };
   const send = (code, data) => {
-    res.writeHead(code, {
-      'content-type': 'application/json',
-      'access-control-allow-origin': ALLOWED_ORIGIN,
-      'access-control-allow-headers': 'authorization, x-client-info, apikey, content-type',
-      'access-control-allow-methods': 'POST, GET, OPTIONS',
-    });
+    if (code === 204) { res.writeHead(204, cors); return res.end(); }
+    res.writeHead(code, { 'Content-Type': 'application/json', ...cors });
     res.end(JSON.stringify(data));
   };
   if (req.method === 'OPTIONS') return send(204, {});
