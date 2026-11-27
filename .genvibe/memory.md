@@ -1,4 +1,4 @@
-<!-- genvibe-memory covers:I7zWH85iIKDXpXfB -->
+<!-- genvibe-memory covers:GLydpIJdMYE7tYla -->
 ## What this app is
 SwiftBuild AI: a cloud-based, AI-powered IDE and app-builder website.
 
@@ -15,6 +15,9 @@ SwiftBuild AI: a cloud-based, AI-powered IDE and app-builder website.
 - Worker reportedly supports parallel writing, Supabase job start/status/resume, success-only deductions and restart resumption. Full builds untested. Render requires `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `ALLOWED_ORIGIN`; user says deployed at `https://swiftbuild-ai.onrender.com` with `VITE_BUILD_WORKER_URL`.
 - Six-agent pipeline, Quick Edit routing, CORS, rich generation prompts, insufficient-credit behavior, Admin/theme/settings and other UI/backend changes are reported implemented but unverified. Render redeploy required for worker changes.
 - `worker/sandbox.mjs` reportedly adds an isolated temporary project runner using a Node child process on the Worker, memory/time limits, cleanup, `npm install --ignore-scripts`, `npm run build`, and HTTP serving/probing where applicable. No Docker or real browser; no full build or Quick Edit tested. No `SUPABASE_SERVICE_ROLE_KEY` in test environment; nothing deployed. `jsdom` was added. Files reportedly changed: `worker/sandbox.mjs`, `worker/server.mjs`, `src/components/PipelineCard.tsx`, `src/lib/auth.ts`.
+- Phase 1 reportedly changes `src/lib/preview.ts`, `src/components/ChatView.tsx`, `src/components/LivePreviewCard.tsx`, `src/components/Dashboard.tsx`, `src/App.tsx`, `worker/consistency.mjs`, `worker/agents.mjs`, `worker/server.mjs`, `src/lib/auth.ts`, and adds `worker/phase1.test.mjs`. Claimed work includes preview asset resolution, storage-compatible previews, full-context Quick Edit/Bug Fix, controlled build concurrency/job queue, image fallbacks, shared project spec and cross-file checks. Not confirmed working.
+- Audit summary says it read `worker/server.mjs`, `worker/agents.mjs`, `worker/sandbox.mjs`, `worker/render.yaml`, `src/lib/preview.ts`, and `src/lib/auth.ts`; no builds, Render calls, or database access. It did not inspect `worker/sse.mjs`, `ChatView.tsx`, or the Supabase `build-app` function in that pass. Tooling-check shell calls were refused. These are audit claims, not independently confirmed findings.
+- Phase 1 audit summary claims Supabase `build_jobs` has `base_files`, `spec`, and `job_mode` columns, while existing jobs have these fields empty. It claims the deployed Worker at `https://swiftbuild-ai.onrender.com` returns HTTP 200, handles CORS preflight with HTTP 204, and appears older than local Phase 1 code because `GET /` lacks `queued` and `maxConcurrent`. The summary is truncated; `VITE_BUILD_WORKER_URL` and real-system Build, Preview, Quick Edit, and Bug Fix results are not established.
 
 ## Open bugs
 - Unterminated JSON — reported 1×; tried: safe parser rewrite/redeployment.
@@ -47,6 +50,7 @@ SwiftBuild AI: a cloud-based, AI-powered IDE and app-builder website.
 - Frontend: `src/App.tsx`; libs `auth.ts`, `theme.ts`, `generator.ts`, `chime.ts`; components include `Dashboard.tsx`, `Sidebar.tsx`, `Composer.tsx`, `ChatView.tsx`, `PipelineCard.tsx`, `PricingModal.tsx`, `PlansGrid.tsx`, `SettingsPage.tsx`, `TemplatesPage.tsx`, `ConnectorsPage.tsx`, `LoadingOverlay.tsx`, `LivePreviewCard.tsx`, `PublishMenu.tsx`, `ProjectTools.tsx`, `Header.tsx`, `AdminPanel.tsx`.
 - Backend: `server/`; Supabase functions `auth-signup`, `generate`, `pesapal`, `build-app`; migration `supabase/migrations/build_jobs_and_files.sql`.
 - Worker: `worker/server.mjs`, `sandbox.mjs`, `sse.mjs`, `agents.mjs`, `package.json`, `README.md`, `render.yaml`; tests `sse.test.mjs`, `.livetest`.
+- Phase 1 also names `worker/consistency.mjs` and `worker/phase1.test.mjs`.
 
 ## User preferences & rules
 - Continue SwiftBuild AI; don’t replace architecture. Prioritize reliable OpenAI streaming.
@@ -60,3 +64,6 @@ SwiftBuild AI: a cloud-based, AI-powered IDE and app-builder website.
 - Keep building when credits are insufficient, then pause when exhausted and show payment button.
 - Preserve six-agent architecture; do not reduce to three. Add a Central Orchestrator coordinating agents.
 - New request: implement a secure isolated build runner compatible with Render Worker, without removing or reducing six-agent architecture.
+- Audit request: audit only; do not modify, delete, overwrite, deploy, or migrate files, code, database tables, settings, or infrastructure. Inspect the existing implementation first, report findings, and wait for approval before changes.
+- Phase 1 request: fix confirmed system defects without replacing architecture; preserve all six agents, Central Orchestrator, Project Execution Engine, and deployment architecture.
+- Phase 1 verification request: check migration, Render Worker deployment, `VITE_BUILD_WORKER_URL`, and real-system Build, Preview, Quick Edit, and Bug Fix; make no code changes or deployment, and report only evidence-backed findings.

@@ -1,5 +1,6 @@
 // SwiftBuild AI: helpers for the six-agent pipeline (prompts + real, deterministic checks).
 import vm from 'node:vm';
+import { consistencyCheck } from './consistency.mjs';
 
 export const REVIEW_SYSTEM = `You are the Review Agent of a software team. You get a project's file list (the implementation plan) and the generated files. Check: every file in the plan exists and is complete, scripts/stylesheets reference files that exist, functions called are defined, buttons and forms have working handlers, no placeholder or lorem ipsum text, no secret keys in the code, and the code follows the plan. Reply ONLY JSON: {"approved": boolean, "issues": [{"file": string (exact file name), "problem": string (specific, one sentence)}]}. List at most 6 real issues. If everything is fine, approved is true and issues is [].`;
 
@@ -8,8 +9,10 @@ export const BACKEND_SYSTEM = `You are the Backend Agent of a software team. Wri
 export const TEST_SYSTEM = `You are the Testing Agent of a software team. You get automated test results and the project's index.html. List up to 5 important user flows (navigation, forms, search/filter, cart or data actions) and say whether the code visibly wires each one up. Be strict: do not mark a flow as working unless you can see its handler in the code. Reply ONLY JSON: {"flows": [{"name": string, "ok": boolean, "note": string}]}.`;
 
 /** Real static checks. Returns [{file, problem}]. Empty array means all checks passed. */
-export function staticCheck(files) {
+export function staticCheck(files, spec) {
   const probs = [];
+  const cc = consistencyCheck(files, spec);
+  probs.push(...cc.problems);
   const names = new Set(files.map((f) => f.name));
   const compile = (code, label, file) => {
     try { new vm.Script(code, { filename: label }); } catch (e) { probs.push({ file, problem: `JavaScript syntax error in ${label}: ${e.message}` }); }
@@ -40,15 +43,17 @@ export function staticCheck(files) {
 }
 
 /** Automated tests: named checks with pass/fail, derived from staticCheck plus structure checks. */
-export function runTests(files) {
-  const probs = staticCheck(files);
+export function runTests(files, spec) {
+  const probs = staticCheck(files, spec);
+  const warnings = consistencyCheck(files, spec).warnings;
   const has = (re) => probs.some((p) => re.test(p.problem));
   const checks = [
-    { name: 'All files non-empty', ok: !has(/empty|missing\./i) },
+    { name: 'Cross-file consistency (ids, handlers, assets, libraries)', ok: !has(/element id|inline handler|References missing (?:asset|icon)|not loaded|defined anywhere/i) },
+    { name: 'All files non-empty', ok: !has(/File is empty|index\.html is missing\./i) },
     { name: 'JavaScript compiles', ok: !has(/syntax error/i) },
     { name: 'File references resolve', ok: !has(/References missing/i) },
     { name: 'index.html complete', ok: !probs.some((p) => p.file === 'index.html' && /closed|missing\./.test(p.problem)) },
     { name: 'No secrets in code', ok: !has(/secret/i) },
   ];
-  return { checks, probs, passed: checks.every((c) => c.ok) };
+  return { checks, probs, warnings, passed: checks.every((c) => c.ok) && probs.length === 0 };
 }

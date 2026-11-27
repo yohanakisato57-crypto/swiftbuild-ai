@@ -40,7 +40,8 @@ async function fn<T>(name: string, body: unknown, query = ''): Promise<Reply<T>>
     // keepalive lets the start request finish even if the user leaves the page right away.
     const res = await fetch(target, {
       method: 'POST',
-      keepalive: name === 'build-app' && (body as { action?: string })?.action === 'start',
+      // Browsers refuse keepalive bodies over 64 KB, so an edit that carries project files skips it.
+      keepalive: name === 'build-app' && (body as { action?: string })?.action === 'start' && JSON.stringify(body).length < 60_000,
       headers: {
         'content-type': 'application/json',
         apikey: KEY,

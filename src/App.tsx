@@ -23,7 +23,7 @@ function PublicSite({ slug }: { slug: string }) {
         document.title = data.title as string;
         setBadge(data.show_badge !== false);
         if (!clientView) void supabase.from('site_views').insert({ slug, referrer: document.referrer.slice(0, 200) || null });
-        setDoc(previewDoc(data.files as ProjectFile[]));
+        setDoc(previewDoc(data.files as ProjectFile[], { storageKey: 'site-' + slug }));
       });
   }, [slug]);
   if (missing) return <div className="grid h-dvh place-items-center bg-bg text-sm text-muted">This site is not published.</div>;

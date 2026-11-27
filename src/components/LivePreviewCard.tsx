@@ -5,13 +5,13 @@ import type { ProjectFile } from '../lib/generator';
 import type { BuildFile } from '../lib/auth';
 
 /** Dark inline card under the prompt: step checklist + a live sandbox that fills in as files land. */
-export default function LivePreviewCard({ files, steps, title }: { files: ProjectFile[]; steps: BuildFile[]; title: string }) {
+export default function LivePreviewCard({ files, steps, title, storageKey }: { files: ProjectFile[]; steps: BuildFile[]; title: string; storageKey?: string }) {
   // Throttle iframe reloads so rapid updates stay smooth.
-  const [doc, setDoc] = useState(() => previewDoc(files));
+  const [doc, setDoc] = useState(() => previewDoc(files, { storageKey, partial: true }));
   useEffect(() => {
-    const t = setTimeout(() => setDoc(previewDoc(files)), 250);
+    const t = setTimeout(() => setDoc(previewDoc(files, { storageKey, partial: true })), 250);
     return () => clearTimeout(t);
-  }, [files]);
+  }, [files, storageKey]);
 
   const done = steps.filter((s) => s.status === 'done').length;
 

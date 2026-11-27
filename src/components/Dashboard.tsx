@@ -354,7 +354,7 @@ export default function Dashboard({ account, onCredits, onAccount, onSignOut }: 
             <iframe
               title="Preview"
               sandbox="allow-scripts"
-              srcDoc={previewing ? previewDoc(previewing.files) : templatePreviewDoc(templatePreview!)}
+              srcDoc={previewing ? previewDoc(previewing.files, { storageKey: 'project-' + String(previewing.id ?? previewIdx) }) : templatePreviewDoc(templatePreview!)}
               className="min-h-0 flex-1 bg-white"
             />
           </div>

@@ -174,7 +174,9 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
         setLiveProj([BASE_FILE]);
         let jobId = attachJobId || '';
         if (!jobId) {
-          const started = await startBuild({ prompt: prompt.slice(0, 3900), answers: ans, sessionId: session.id, questionnaireId: questionnaireId || undefined });
+          // An existing project is sent along, so a follow-up is an edit of those files (Quick Edit / Bug Fix / Feature) and not a rebuild.
+          const baseFiles = project && project.mode === 'build' && project.files.length ? project.files.slice(0, 60).map((f) => ({ name: f.name, lang: f.lang, content: f.content })) : undefined;
+          const started = await startBuild({ prompt: prompt.slice(0, 3900), answers: ans, sessionId: session.id, questionnaireId: questionnaireId || undefined, baseFiles });
           if (started.status === 402) {
             notify('You need credits for this. Top up to continue.');
             onBuy();
@@ -271,7 +273,7 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
         setLive('');
       }
     },
-    [account.id, history, notify, onBuy, onCredits, onProject, session.id, session.title],
+    [account.id, history, notify, onBuy, onCredits, onProject, project, session.id, session.title],
   );
 
   const payUnlock = useCallback(
@@ -416,7 +418,7 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
       {pane === 'preview' && (
         <div className="relative min-h-0 flex-1 bg-white">
           {shown ? (
-            <iframe ref={fullRef} title="Full preview" sandbox="allow-scripts" srcDoc={withTarget(previewDoc(shown.files))} className="h-full w-full border-0 bg-white" />
+            <iframe ref={fullRef} title="Full preview" sandbox="allow-scripts" srcDoc={withTarget(previewDoc(shown.files, { storageKey: session.id, partial: building }))} className="h-full w-full border-0 bg-white" />
           ) : (
             <div className="grid h-full place-items-center bg-bg p-6 text-center text-sm text-faint">{busy ? 'Your project will appear here.' : 'Your project preview appears here once built.'}</div>
           )}
@@ -469,7 +471,7 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
 
             {/* Inline loading state under the prompt — the chat stays visible. */}
             {building && mode === 'build' && <PipelineCard agents={liveAgents} />}
-            {building && mode === 'build' && liveProj.length > 0 && <LivePreviewCard files={liveProj} steps={liveFiles} title={session.title} />}
+            {building && mode === 'build' && liveProj.length > 0 && <LivePreviewCard storageKey={session.id} files={liveProj} steps={liveFiles} title={session.title} />}
             {building && mode !== 'build' && (
               <p className="text-xs text-muted">{mode === 'plan' ? 'Writing the plan…' : 'Thinking…'}</p>
             )}
@@ -497,7 +499,7 @@ export default function ChatView({ account, session, firstPrompt, firstMode, onC
               {busy ? 'Your project will appear here.' : 'Your project preview and code appear here once built.'}
             </div>
           ) : view === 'preview' ? (
-            <iframe title="Preview" sandbox="allow-scripts" srcDoc={previewDoc(shown.files)} className="min-h-0 flex-1 bg-white" />
+            <iframe title="Preview" sandbox="allow-scripts" srcDoc={previewDoc(shown.files, { storageKey: session.id, partial: building })} className="min-h-0 flex-1 bg-white" />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-line px-3 py-1.5">
