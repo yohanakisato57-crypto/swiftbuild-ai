@@ -1,4 +1,4 @@
-<!-- genvibe-memory covers:GLydpIJdMYE7tYla -->
+<!-- genvibe-memory covers:LyQbrUiFxa8Zc323 -->
 ## What this app is
 SwiftBuild AI: a cloud-based, AI-powered IDE and app-builder website.
 
@@ -17,7 +17,11 @@ SwiftBuild AI: a cloud-based, AI-powered IDE and app-builder website.
 - `worker/sandbox.mjs` reportedly adds an isolated temporary project runner using a Node child process on the Worker, memory/time limits, cleanup, `npm install --ignore-scripts`, `npm run build`, and HTTP serving/probing where applicable. No Docker or real browser; no full build or Quick Edit tested. No `SUPABASE_SERVICE_ROLE_KEY` in test environment; nothing deployed. `jsdom` was added. Files reportedly changed: `worker/sandbox.mjs`, `worker/server.mjs`, `src/components/PipelineCard.tsx`, `src/lib/auth.ts`.
 - Phase 1 reportedly changes `src/lib/preview.ts`, `src/components/ChatView.tsx`, `src/components/LivePreviewCard.tsx`, `src/components/Dashboard.tsx`, `src/App.tsx`, `worker/consistency.mjs`, `worker/agents.mjs`, `worker/server.mjs`, `src/lib/auth.ts`, and adds `worker/phase1.test.mjs`. Claimed work includes preview asset resolution, storage-compatible previews, full-context Quick Edit/Bug Fix, controlled build concurrency/job queue, image fallbacks, shared project spec and cross-file checks. Not confirmed working.
 - Audit summary says it read `worker/server.mjs`, `worker/agents.mjs`, `worker/sandbox.mjs`, `worker/render.yaml`, `src/lib/preview.ts`, and `src/lib/auth.ts`; no builds, Render calls, or database access. It did not inspect `worker/sse.mjs`, `ChatView.tsx`, or the Supabase `build-app` function in that pass. Tooling-check shell calls were refused. These are audit claims, not independently confirmed findings.
-- Phase 1 audit summary claims Supabase `build_jobs` has `base_files`, `spec`, and `job_mode` columns, while existing jobs have these fields empty. It claims the deployed Worker at `https://swiftbuild-ai.onrender.com` returns HTTP 200, handles CORS preflight with HTTP 204, and appears older than local Phase 1 code because `GET /` lacks `queued` and `maxConcurrent`. The summary is truncated; `VITE_BUILD_WORKER_URL` and real-system Build, Preview, Quick Edit, and Bug Fix results are not established.
+- Phase 1 audit summary claims Supabase `build_jobs` has `base_files`, `spec`, and `job_mode` columns, while existing jobs have these fields empty. It claims the deployed Worker at `https://swiftbuild-ai.onrender.com` returns HTTP 200 and handles CORS preflight with HTTP 204. The summary is truncated; `VITE_BUILD_WORKER_URL` and real-system Build, Preview, Quick Edit, and Bug Fix results are not established.
+- Agent claims a fresh direct check found Worker response `{"ok":true,"running":0,"queued":0,"maxConcurrent":2}`, CORS preflight from `https://swiftbuild.online` returned 204 with `Access-Control-Allow-Origin: *`, and Render logs said service live on `:10000`. No code changes or deployment were made in that check; full Build, Preview, Quick Edit and Bug Fix remain untested. The `curl` commands exited 0; outputs are agent-reported, not independently confirmed.
+- Agent summary says the browser at `swiftbuild.online` could not reach the Render Worker, so the build did not start and credits were not deducted. It suggests an outdated Render Worker, mismatched `ALLOWED_ORIGIN`, or a sleeping/crashed Worker as possible causes; Render settings were not inspected. Unverified agent claim.
+- Worker fetch-failed fix is claimed: agent says the Worker is now live and CORS preflight works; fetch behavior remains unverified. Original issue was reported once.
+- Agent says Full Build requires an authenticated account and credits and reports an unauthenticated start request returned 401. Full Build, Preview, Quick Edit, and Bug Fix on the real system remain untested; the user was instructed to run a logged-in Build at `swiftbuild.online`. Agent-reported, unverified.
 
 ## Open bugs
 - Unterminated JSON — reported 1×; tried: safe parser rewrite/redeployment.
@@ -32,7 +36,6 @@ SwiftBuild AI: a cloud-based, AI-powered IDE and app-builder website.
 - Templates partial modal — reported 1×; tried: claimed dedicated page.
 - Supabase Connector showed “Database” and one input — reported 1×; tried: claimed labeled fields.
 - Dashboard spacing/keyboard overlap — reported 2×; tried: centered wrapper, flex, viewport adjustment.
-- Worker fetch failed — reported 1×; tried: none.
 - Mobile Publish clipped — reported 1×; tried: claimed scrollable placement.
 - Admin credit changes unconfirmed — reported 1×; tried: claimed Supabase/ledger actions.
 - Preview bar visibility request — reported 1×; superseded by chat-bubble request; unverified.
@@ -67,3 +70,4 @@ SwiftBuild AI: a cloud-based, AI-powered IDE and app-builder website.
 - Audit request: audit only; do not modify, delete, overwrite, deploy, or migrate files, code, database tables, settings, or infrastructure. Inspect the existing implementation first, report findings, and wait for approval before changes.
 - Phase 1 request: fix confirmed system defects without replacing architecture; preserve all six agents, Central Orchestrator, Project Execution Engine, and deployment architecture.
 - Phase 1 verification request: check migration, Render Worker deployment, `VITE_BUILD_WORKER_URL`, and real-system Build, Preview, Quick Edit, and Bug Fix; make no code changes or deployment, and report only evidence-backed findings.
+- User wants to try a Full Build together.
